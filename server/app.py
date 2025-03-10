@@ -3,7 +3,7 @@ from pymongo import MongoClient
 import gridfs
 from bson import ObjectId
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -34,32 +34,32 @@ def parse_time(time: str):
 def start_session():
     """Создает новую запись сессии в базе данных"""
     try:
-        data = request.json
-        student_group = data.get("group")
-        last_name = data.get("last_name")
-        first_name = data.get("first_name")
-        middle_name = data.get("middle_name")
+        data = request.form
+        group = data.get("group")
+        surname = data.get("surname")
+        name = data.get("name")
+        patronymic = data.get("patronymic")
 
-        if not (student_group and last_name and first_name and middle_name):
-            return jsonify({"error": "Все поля обязательны"}), 400
+        if not (group and surname and name and patronymic):
+            return jsonify({"error": "Поля 'group', 'surname', 'name', 'patronymic' обязательны для заполнения"}), 400
 
-        session_start = datetime.utcnow()
-        session_id = ObjectId()
+        session_start = datetime.now(timezone.utc)
+        id = ObjectId()
 
         session_data = {
-            "_id": session_id,
-            "student_group": student_group,
-            "last_name": last_name,
-            "first_name": first_name,
-            "middle_name": middle_name,
+            "_id": id,
+            "group": group,
+            "surname": surname,
+            "name": name,
+            "patronymic": patronymic,
             "session_start": session_start,
             "session_end": None,
-            "video_id": None,
-            "status": "pending"
+            "video_path": None,
+            "status": None
         }
 
         sessions_collection.insert_one(session_data)
-        return jsonify({"session_id": str(session_id)}), 201
+        return jsonify({"id": str(id)}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -76,41 +76,6 @@ def upload_file():
     return jsonify({"file_id": str(file_id)}), 200
 
 
-@app.route('/get/<file_id>', methods=['GET'])
-def get_file(file_id):
-    try:
-        file_data = fs.get(ObjectId(file_id))
-        return file_data.read(), 200, {
-            'Content-Type': 'video/webm',
-            'Content-Disposition': f'attachment; filename={file_data.filename}'
-        }
-    except gridfs.errors.NoFile:
-        return jsonify({"error": "File not found"}), 404
-
-
-@app.route('/check_sessions', methods=['POST'])
-def check_sessions():
-    try:
-        now = datetime.utcnow()
-        pending_sessions = db.sessions.find({"status": "pending"})
-
-        for session in pending_sessions:
-            if "session_end" in session and session["session_end"]:
-                db.sessions.update_one(
-                    {"_id": session["_id"]},
-                    {"$set": {"status": "completed"}}
-                )
-            else:
-                db.sessions.update_one(
-                    {"_id": session["_id"]},
-                    {"$set": {"status": "suspicious"}}
-                )
-
-        return jsonify({'message': 'Sessions checked and updated'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/get_sessions', methods=['GET'])
 def get_sessions():
     try:
@@ -118,6 +83,41 @@ def get_sessions():
         return jsonify(sessions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# @app.route('/get/<file_id>', methods=['GET'])
+# def get_file(file_id):
+#     try:
+#         file_data = fs.get(ObjectId(file_id))
+#         return file_data.read(), 200, {
+#             'Content-Type': 'video/webm',
+#             'Content-Disposition': f'attachment; filename={file_data.filename}'
+#         }
+#     except gridfs.errors.NoFile:
+#         return jsonify({"error": "File not found"}), 404
+
+
+# @app.route('/check_sessions', methods=['POST'])
+# def check_sessions():
+#     try:
+#         now = datetime.now(timezone.utc)
+#         pending_sessions = db.sessions.find({"status": "pending"})
+
+#         for session in pending_sessions:
+#             if "session_end" in session and session["session_end"]:
+#                 db.sessions.update_one(
+#                     {"_id": session["_id"]},
+#                     {"$set": {"status": "completed"}}
+#                 )
+#             else:
+#                 db.sessions.update_one(
+#                     {"_id": session["_id"]},
+#                     {"$set": {"status": "suspicious"}}
+#                 )
+
+#         return jsonify({'message': 'Sessions checked and updated'}), 200
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
