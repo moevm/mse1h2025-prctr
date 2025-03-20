@@ -1,15 +1,19 @@
-import {deleteFilesFromTempList} from "./common.js";
+import { deleteFilesFromTempList } from "./common.js";
+import { log_client_action } from "./logger.js";
 
 const startRecordButton = document.querySelector('.record-section__button_record-start');
 const stopRecordButton = document.querySelector('.record-section__button_record-stop');
 const uploadButton = document.querySelector('.upload_button');
 
 const inputElements = {
-    group: document.querySelector('#group_input'),
-    name: document.querySelector('#name_input'),
-    surname: document.querySelector('#surname_input'),
-    patronymic: document.querySelector('#patronymic_input')
+	group: document.querySelector('#group_input'),
+	name: document.querySelector('#name_input'),
+	surname: document.querySelector('#surname_input'),
+	patronymic: document.querySelector('#patronymic_input')
 };
+
+let inactivityTimeout;
+const INACTIVITY_THRESHOLD = 300000;
 
 function saveInputValues() {
 	chrome.storage.local.set({
@@ -20,68 +24,92 @@ function saveInputValues() {
 			patronymic: inputElements.patronymic.value
 		}
 	});
+	log_client_action('Input values saved');
 }
 
 window.addEventListener('load', async () => {
-    let inputValues = await chrome.storage.local.get('inputElementsValue');
+	log_client_action('Popup opened');
+
+	let inputValues = await chrome.storage.local.get('inputElementsValue');
 	inputValues = inputValues.inputElementsValue || {};
-    for (const [key, value] of Object.entries(inputValues)) {
-        inputElements[key].value = value;
-    }
+	for (const [key, value] of Object.entries(inputValues)) {
+		inputElements[key].value = value;
+	}
 
 	Object.values(inputElements).forEach(input => {
 		input.addEventListener('input', saveInputValues);
 	});
+
+	document.addEventListener('mousemove', resetInactivityTimer);
+	document.addEventListener('keydown', resetInactivityTimer);
+	resetInactivityTimer();
 });
 
+function resetInactivityTimer() {
+	clearTimeout(inactivityTimeout);
+	inactivityTimeout = setTimeout(() => {
+		log_client_action('Inactivity timeout reached');
+	}, INACTIVITY_THRESHOLD);
+}
+
 async function startRecCallback() {
-    startRecordButton.setAttribute('disabled', '');
-    stopRecordButton.removeAttribute('disabled');
-    saveInputValues();
-    
-    const formData = new FormData();
-    formData.append('group', inputElements.group.value);
-    formData.append('name', inputElements.name.value);
-    formData.append('surname', inputElements.surname.value);
-    formData.append('patronymic', inputElements.patronymic.value);
+	startRecordButton.setAttribute('disabled', '');
+	stopRecordButton.removeAttribute('disabled');
+	saveInputValues();
 
+	const browserFingerprint = {
+		browserVersion: navigator.userAgent.match(/Chrome\/([0-9.]+)/)?.[1] || 'unknown',
+		timestamp: new Date().toISOString()
+	};
+	log_client_action(`Start recording initiated - Browser fingerprint: ${JSON.stringify(browserFingerprint)}`);
 
-    try {
-        const response = await fetch('http://127.0.0.1:5000/start_session', {
-            method: 'POST',
-            mode: 'cors',
-            body: formData
-        });
+	const formData = new FormData();
+	formData.append('group', inputElements.group.value);
+	formData.append('name', inputElements.name.value);
+	formData.append('surname', inputElements.surname.value);
+	formData.append('patronymic', inputElements.patronymic.value);
 
-        if (!response.ok) {
-            throw new Error('Сервер вернул ${response.status}');
-        }
-        const result = await response.json();
-        const sessionId = result.id;
+	try {
+		const response = await fetch('http://127.0.0.1:5000/start_session', {
+			method: 'POST',
+			mode: 'cors',
+			body: formData
+		});
 
-        chrome.storage.local.set({'session_id': sessionId}, () => {
-            console.log('session_id успешно сохранён!');
-        });
+		if (!response.ok) {
+			throw new Error(`Сервер вернул ${response.status}`);
+		}
+		const result = await response.json();
+		const sessionId = result.id;
 
-    } catch (error) {
-        console.error("Ошибка инициализации сессии", error);
-        startRecordButton.removeAttribute('disabled');
-        stopRecordButton.setAttribute('disabled', '');
-        return;
-    }
+		chrome.storage.local.set({'session_id': sessionId}, () => {
+			console.log('session_id успешно сохранён!');
+			log_client_action(`Session initialized with ID: ${sessionId}`);
+		});
 
-    // После успешной инициализации сессии отправляем сообщение для начала записи
-    await chrome.runtime.sendMessage({
-        action: "startRecord"
-    });
+	} catch (error) {
+		console.error("Ошибка инициализации сессии", error);
+		log_client_action(`Session initialization failed: ${error.message}`);
+		startRecordButton.removeAttribute('disabled');
+		stopRecordButton.setAttribute('disabled', '');
+		return;
+	}
+
+	// После успешной инициализации сессии отправляем сообщение для начала записи
+	await chrome.runtime.sendMessage({
+		action: "startRecord"
+	});
+	log_client_action('Start recording message sent');
 }
 
 async function stopRecCallback() {
 	stopRecordButton.setAttribute('disabled', '');
 	startRecordButton.removeAttribute('disabled');
+	log_client_action('Stop recording initiated');
 	await chrome.runtime.sendMessage({
 		action: "stopRecord"
 	});
+	log_client_action('Stop recording message sent');
 }
 
 startRecordButton.addEventListener('click', startRecCallback);

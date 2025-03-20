@@ -7,21 +7,22 @@
 		"storage",
 		"alarms",
 		"tabs",
-		"desktopCapture"
+		"desktopCapture",
+		"downloads"
 	],
 	"action": {
 		"default_popup": "index.html"
 	},
 	"background": {
-    	"service_worker": "background.js",
+		"service_worker": "background.js",
 		"type": "module"
-  	},
+	},
 	"web_accessible_resources": [
-        {
-        "resources": ["media.html", "media.js"],
-        "matches": ["<all_urls>"]
-        }
-    ],
+		{
+			"resources": ["media.html", "media.js", "logger.js"],
+			"matches": ["<all_urls>"]
+		}
+	],
 	"icons": {
 		"16": "icon.png",
 		"48": "icon.png",

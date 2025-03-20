@@ -42,3 +42,17 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 		});
 	}
 });
+
+chrome.runtime.onMessage.addListener(
+	function(message, sender, sendResponse) {
+		if (message.action === "clearLogs") {
+			chrome.storage.local.remove('extension_logs', () => {
+				if (chrome.runtime.lastError) {
+					console.error('Ошибка при очистке логов:', chrome.runtime.lastError);
+				} else {
+					console.log('Логи успешно очищены');
+				}
+			});
+		}
+	}
+);
