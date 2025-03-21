@@ -1,3 +1,5 @@
+import {deleteFilesFromTempList} from "./common.js";
+
 var streams = {
     screen: null,
     microphone: null,
@@ -21,9 +23,27 @@ var cameraFileHandle = null;
 var combinedWritableStream = null;
 var cameraWritableStream = null;
 var forceTimeout = null;
+var startTime = undefined;
+var endTime = undefined;
 
-var startRecordTime = null;
-var finishRecordTime = null;
+var metadata = {
+    screen: {
+        session_client_start: undefined,
+        session_client_end: undefined,
+        session_client_duration: undefined,
+        session_client_mime: undefined,
+        session_client_resolution: undefined,
+        session_client_size: undefined // MB
+    },
+    camera: {
+        session_client_start: undefined,
+        session_client_end: undefined,
+        session_client_duration: undefined,
+        session_client_mime: undefined,
+        session_client_resolution: undefined,
+        session_client_size: undefined // MB
+    }
+};
 
 const stopStreams = () => {
     Object.entries(streams).forEach(([stream, value]) => {
@@ -32,6 +52,45 @@ const stopStreams = () => {
             streams[stream] = null;
         }
     });
+};
+
+const getDifferenceInTime = (date1, date2) => {
+    const diff = Math.abs(Math.floor(date2.getTime() / 1000) - Math.floor(date1.getTime() / 1000)); // ms
+    const totalSeconds = Math.floor(diff);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    // Для удобного представления
+    const formattedHours = String(hours).padStart(2, '0');
+    const formattedMinutes = String(minutes).padStart(2, '0');
+    const formattedSeconds = String(seconds).padStart(2, '0');
+
+    return `${formattedHours}:${formattedMinutes}:${formattedSeconds}`;
+};
+
+const setMetadatasRecordOn = () => {
+    metadata.screen.session_client_start = getCurrentDateString(startTime);
+    metadata.screen.session_client_mime = recorders.combined.mimeType;
+    const [screenVideoTrack] = streams.screen.getVideoTracks();
+    const screenSettings = screenVideoTrack.getSettings();
+    metadata.screen.session_client_resolution = `${screenSettings.width}×${screenSettings.height}`;
+    metadata.camera.session_client_start = getCurrentDateString(startTime);
+    metadata.camera.session_client_mime = recorders.camera.mimeType;
+    const [cameraVideoTrack] = streams.camera.getVideoTracks();
+    const cameraSettings = cameraVideoTrack.getSettings();
+    metadata.camera.session_client_resolution = `${cameraSettings.width}×${cameraSettings.height}`;
+};
+
+const setMetadatasRecordOff = async () => {
+    metadata.screen.session_client_end = getCurrentDateString(endTime);
+    metadata.screen.session_client_duration = getDifferenceInTime(endTime, startTime);
+    metadata.camera.session_client_end = getCurrentDateString(endTime);
+    metadata.camera.session_client_duration = getDifferenceInTime(endTime, startTime);
+    const screenFile = await combinedFileHandle.getFile();
+    metadata.screen.session_client_size = (screenFile.size / 1000000).toFixed(3);
+    const cameraFile = await cameraFileHandle.getFile();
+    metadata.camera.session_client_size = (cameraFile.size / 1000000).toFixed(3);
 };
 
 async function getMediaDevices() {
@@ -139,7 +198,7 @@ async function getMediaDevices() {
                             await cameraWritableStream.write(event.data);
                         }
                     };
-
+                  
                     resolve();
                 } catch (error) {
                     console.error('Ошибка при захвате:', error);
@@ -154,15 +213,12 @@ async function getMediaDevices() {
 }
 
 async function cleanup() {
-    if (forceTimeout) {
-        clearTimeout(forceTimeout);
-    }
+    if (forceTimeout) clearTimeout(forceTimeout);
     stopStreams();
     combinedPreview.srcObject = null;
     cameraPreview.srcObject = null;
     recorders.combined = null;
     recorders.camera = null;
-    finishRecordTime = getCurrentDateString(new Date());
     console.log('Все потоки и запись остановлены.');
 }
 
@@ -181,7 +237,8 @@ async function handleFileSave(handle, name) {
 }
 
 const getCurrentDateString = (date) => {
-    return `${date.getDate()}-${date.getMonth()+1}-${date.getFullYear()}T${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}`;
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T` + 
+    `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
 const getAvailableDiskSpace = async () => {
@@ -215,20 +272,31 @@ async function uploadVideo(combinedFile, cameraFile) {
         formData.append("id", session_id);
         formData.append("screen_video", combinedFile, combinedFileName);
         formData.append("camera_video", cameraFile, cameraFileName);
+        await setMetadatasRecordOff();
+        formData.append("metadata", JSON.stringify(metadata));
 
-        try {
-            const response = await fetch("http://127.0.0.1:5000/upload_video", {
-                method: "POST",
-                body: formData,
+        fetch('http://127.0.0.1:5000/upload_video', {
+            method: "POST",
+            body: formData,
+        })
+            .then(async (response) => {
+                if (!response.ok) {
+                    throw new Error(`Ошибка при загрузке видео: ${response.status}`);
+                }
+                const result = await response.json();
+                console.log("Видео успешно отправлено:", result);
+            })
+            .then(async () => {
+                await deleteFilesFromTempList();
+                chrome.alarms.get('dynamicCleanup', (alarm) => {
+                    if (alarm) {
+                        chrome.alarms.clear('dynamicCleanup');
+                    }
+                });
+            })
+            .catch(error => {
+                console.error("Ошибка при отправке видео на сервер:", error);
             });
-            if (!response.ok) {
-                throw new Error(`Ошибка при загрузке видео: ${response.status}`);
-            }
-            const result = await response.json();
-            console.log("Видео успешно отправлено:", result);
-        } catch (error) {
-            console.error("Ошибка при отправке видео на сервер:", error);
-        }
     });
 }
 
@@ -251,6 +319,8 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 });
 
 function stopRecord() {
+    setMetadatasRecordOn();
+    endTime = new Date();
     const stopPromises = [];
 
     if (recorders.combined) {
@@ -300,7 +370,8 @@ async function startRecord() {
     }
 
     rootDirectory = await navigator.storage.getDirectory();
-    startRecordTime = getCurrentDateString(new Date());
+    startTime = new Date();
+    let startRecordTime = getCurrentDateString(startTime);
 
     combinedFileName = `proctoring_screen_${startRecordTime}.mp4`;
     cameraFileName = `proctoring_camera_${startRecordTime}.mp4`;
@@ -333,7 +404,8 @@ async function startRecord() {
             console.log('Запись принудительно завершена спустя 4 часа!');
             stopRecord();
         }, 14400000);
-
+        
+        startTime = new Date();
         recorders.combined.start(5000);
         recorders.camera.start(5000);
         console.log('Запись начата');

@@ -49,7 +49,8 @@ def start_session():
             "session_time_end": None,
             "screen_video_path": None,
             "camera_video_path": None,
-            "status": None
+            "status": None,
+            "metadata": None
         }
 
         sessions_collection.insert_one(session_data)
@@ -69,6 +70,7 @@ def upload_video():
         screen_video = request.files["screen_video"]
         camera_video = request.files["camera_video"]
         id = request.form["id"]
+        metadata = json.loads(request.form["metadata"])
 
         session = sessions_collection.find_one({"_id": ObjectId(id)})
         if not session:
@@ -95,7 +97,8 @@ def upload_video():
                 "session_time_end": session_time_end,
                 "screen_video_path": screen_video_path,
                 "camera_video_path": camera_video_path,
-                "status": "good"
+                "status": "good",
+                "metadata": metadata
             }}
         )
 
