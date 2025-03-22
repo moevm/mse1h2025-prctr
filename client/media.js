@@ -279,6 +279,9 @@ function stopRecord() {
         }));
     }
 
+    visual_cues(["Запись завершена. Файл будет сохранен и загружен на сервер."], "Окончание записи");
+
+
     // Ждем завершения обоих рекордеров, затем вызываем uploadVideo() и cleanup()
     Promise.all(stopPromises).then(async () => {
         await uploadVideo(await combinedFileHandle.getFile(), await cameraFileHandle.getFile());
@@ -341,4 +344,59 @@ async function startRecord() {
         console.error('Ошибка при запуске записи:', error);
         cleanup();
     }
+    visual_cues(["Запись началась. Пожалуйста, убедитесь, что ваше устройство работает корректно."], "Начало записи");
+}
+
+function visual_cues(messages, title = "Уведомление") {
+    let overlay = document.createElement("div");
+    overlay.style.position = "fixed";
+    overlay.style.top = "0";
+    overlay.style.left = "0";
+    overlay.style.width = "100vw";
+    overlay.style.height = "100vh";
+    overlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    overlay.style.display = "flex";
+    overlay.style.justifyContent = "center";
+    overlay.style.alignItems = "center";
+    overlay.style.zIndex = "1000";
+
+    let modal = document.createElement("div");
+    modal.style.backgroundColor = "white";
+    modal.style.padding = "20px";
+    modal.style.borderRadius = "10px";
+    modal.style.boxShadow = "0 4px 8px rgba(0, 0, 0, 0.2)";
+    modal.style.textAlign = "center";
+    modal.style.minWidth = "300px";
+
+    let header = document.createElement("h2");
+    header.textContent = title;
+    modal.appendChild(header);
+
+    let messageContainer = document.createElement("div");
+    if (!Array.isArray(messages)) {
+        messages = [messages];
+    }
+    messages.forEach(msg => {
+        let p = document.createElement("p");
+        p.textContent = msg;
+        messageContainer.appendChild(p);
+    });
+    modal.appendChild(messageContainer);
+
+    let button = document.createElement("button");
+    button.textContent = "Хорошо. Я прочитал(а).";
+    button.style.marginTop = "15px";
+    button.style.padding = "10px 20px";
+    button.style.border = "none";
+    button.style.backgroundColor = "#007BFF";
+    button.style.color = "white";
+    button.style.borderRadius = "5px";
+    button.style.cursor = "pointer";
+    button.onclick = function() {
+        document.body.removeChild(overlay);
+    };
+    modal.appendChild(button);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
 }
