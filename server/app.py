@@ -106,9 +106,9 @@ def upload_video():
                 "session_time_end": session_time_end,
                 "screen_video_path": screen_video_path,
                 "camera_video_path": camera_video_path,
-                "logs_path": logs_file_path,
                 "status": "good",
-                "metadata": metadata
+                "metadata": metadata,
+                "logs_path": logs_file_path
             }}
         )
 
