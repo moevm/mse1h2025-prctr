@@ -1,0 +1,30 @@
+name: Release Attacher for client and server
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release-archives:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create archive client
+        run: zip -r client_${{ github.event.release.tag_name }}.zip client/*
+
+      - name: Create archive server
+        run: zip -r server_${{ github.event.release.tag_name }}.zip server/*
+
+      - name: Attach archives to GitHub Release
+        uses: softprops/action-gh-release@v2
+        # Для softprops/action-gh-release@v2 токен по умолчанию не нужен
+        # env:
+        #   GITHUB_TOKEN: ${{ github.token }}
+        with:
+          files: |
+            client_${{ github.event.release.tag_name }}.zip
+            server_${{ github.event.release.tag_name }}.zip
