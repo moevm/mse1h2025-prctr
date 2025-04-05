@@ -6,6 +6,7 @@ const stopRecordButton = document.querySelector('.record-section__button_record-
 const uploadButton = document.querySelector('.record-section__button_upload');
 const permissionsButton = document.querySelector('.record-section__button_permissions');
 const noPatronymicCheckbox = document.querySelector('#no_patronymic_checkbox');
+const permissionsStatus = document.querySelector('#permissions-status');
 
 const inputElements = {
 	group: document.querySelector('#group_input'),
@@ -137,6 +138,32 @@ function saveInputValues() {
 	log_client_action('Input values saved');
 }
 
+// Проверка разрешений камеры и микрофона
+async function updatePermissionsStatus() {
+    let micStatus = '✗ Микрофон';
+    let camStatus = '✗ Камера';
+    let screenStatus = '✗ Экран';
+
+    try {
+        const micPermission = await navigator.permissions.query({ name: 'microphone' });
+        micStatus = micPermission.state === 'granted' ? '✓ Микрофон' : '✗ Микрофон';
+    } catch (e) {
+        console.log('Microphone permission check failed:', e);
+    }
+
+    try {
+        const camPermission = await navigator.permissions.query({ name: 'camera' });
+        camStatus = camPermission.state === 'granted' ? '✓ Камера' : '✗ Камера';
+    } catch (e) {
+        console.log('Camera permission check failed:', e);
+    }
+
+    const storedPermissions = await chrome.storage.local.get('screenPermission');
+    screenStatus = storedPermissions.screenPermission || '✗ Экран';
+
+    permissionsStatus.textContent = `${micStatus} | ${camStatus} | ${screenStatus}`;
+}
+
 async function checkAndCleanLogs() {
 	const now = new Date();
 	const delTime = 24 * 60 * 60 * 1000;
@@ -254,6 +281,9 @@ window.addEventListener('load', async () => {
     });
 
 	updateButtonsStates();
+    
+    updatePermissionsStatus();
+    setInterval(updatePermissionsStatus, 10000); // Обновление каждые 10 секунд
 });
 
 buttonElements.permissions.addEventListener('click', () => {

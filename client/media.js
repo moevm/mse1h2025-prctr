@@ -27,6 +27,7 @@ var cameraWritableStream = null;
 var forceTimeout = null;
 var startTime = undefined;
 var endTime = undefined;
+var screenCheckInterval = null;
 
 var metadata = {
     screen: {
@@ -47,6 +48,34 @@ var metadata = {
     }
 };
 
+async function updateScreenPermissionStatus(hasAccess, reason = '') {
+    const status = hasAccess ? '✓ Экран' : '✗ Экран';
+    await chrome.storage.local.set({ 'screenPermission': status });
+    if (reason) {
+        log_client_action(`Screen permission updated: ${status} - ${reason}`);
+    }
+}
+
+async function checkScreenAccess() {
+    let screenStatus;
+    if (streams.screen) {
+        const videoTracks = streams.screen.getVideoTracks();
+        const isScreenActive = videoTracks.length > 0 && videoTracks.every(track => track.enabled && !track.muted);
+        if (isScreenActive) {
+            log_client_action('Screen access check: active');
+            screenStatus = '✓ Экран';
+        } else {
+            log_client_action('Screen access check: inactive');
+            screenStatus = '✗ Экран';
+        }
+    } else {
+        log_client_action('Screen access check: no stream');
+        screenStatus = '✗ Экран';
+    }
+
+    await chrome.storage.local.set({ 'screenPermission': screenStatus });
+}
+
 const stopStreams = () => {
     Object.entries(streams).forEach(([stream, value]) => {
         if (value) {
@@ -54,6 +83,10 @@ const stopStreams = () => {
             streams[stream] = null;
         }
     });
+    if (screenCheckInterval) {
+        clearInterval(screenCheckInterval);
+        screenCheckInterval = null;
+    }
     log_client_action('All streams stopped')
 };
 
@@ -119,6 +152,7 @@ async function getMediaDevices() {
                     console.error('Пользователь отменил выбор экрана');
                     reject('Пользователь отменил выбор экрана');
                     showVisualCue(["Пользователь отменил выбор экрана!"], "Ошибка");
+                    await updateScreenPermissionStatus(false, 'User canceled screen selection');
                     return;
                 }
                 try {
@@ -133,8 +167,12 @@ async function getMediaDevices() {
 
                     if (!streams.screen || streams.screen.getVideoTracks().length === 0) {
                         log_client_action('Screen permission denied');
+                        await updateScreenPermissionStatus(false, 'Failed to get screen stream');
                         throw new Error('Не удалось получить видеопоток с экрана');
                     }
+
+                    checkScreenAccess();
+                    screenCheckInterval = setInterval(checkScreenAccess, 10000);
 
                     let micPermissionDenied = false;
                     let camPermissionDenied = false;
@@ -264,11 +302,13 @@ async function getMediaDevices() {
                     resolve();
                 } catch (error) {
                     console.error('Ошибка при захвате:', error);
+                    await updateScreenPermissionStatus(false, 'Capture error');
                     stopStreams();
                     reject(error);
                 }
             });
         } catch (error) {
+            await updateScreenPermissionStatus(false, 'External error');
             reject(error);
         }
     });
@@ -330,13 +370,13 @@ window.addEventListener('unload', () => {
     buttonsStatesSave('needPermissions');
 })
 
-window.addEventListener('load', () => {
-    Object.values(streams).some(async (stream) => {
-        if (stream === null) {
-            await sendButtonsStates('needPermissions');
-            return true;
-        }
-    });
+window.addEventListener('load', async () => {
+    await chrome.storage.local.set({ 'screenPermission': '✗ Экран' }); // Изначально нет доступа
+
+    const hasNullStream = Object.values(streams).some(stream => stream === null);
+    if (hasNullStream) {
+        await sendButtonsStates('needPermissions');
+    }
 });
 
 // Функция для отправки видео на сервер после завершения записи
