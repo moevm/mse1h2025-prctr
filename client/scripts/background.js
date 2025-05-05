@@ -230,3 +230,11 @@ chrome.runtime.onMessage.addListener(
 	  sendResponse(message);
 	}
 );
+
+function getNumberOfDisplays() {
+	return new Promise(resolve => {
+		chrome.system.display.getInfo(displays => {
+			resolve(displays.length);
+		});
+	});
+}

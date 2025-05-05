@@ -8,7 +8,8 @@
 		"alarms",
 		"tabs",
 		"desktopCapture",
-		"downloads"
+		"downloads",
+		"system.display"
 	],
 	"content_scripts": [
 		{
