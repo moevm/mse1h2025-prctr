@@ -1,4 +1,4 @@
-import { buttonsStatesSave, deleteFiles, getCurrentDateString, showModalNotify } from "./common.js";
+import { buttonsStatesSave } from "./common.js";
 import { logClientAction, checkAndCleanLogs, clearLogs } from "./logger.js";
 
 const noPatronymicCheckbox = document.querySelector('#no_patronymic_checkbox');
@@ -380,21 +380,19 @@ buttonElements.permissions.addEventListener('click', () => {
 buttonElements.upload.addEventListener('click', async () => {
     logClientAction({ action: "Click upload button" });
     if (!server_connection) return;
-	const files = (await chrome.storage.local.get('tempFiles'))['tempFiles'];
-	if (!files) {
-		buttonsStatesSave('needPermissions');
-		updateButtonsStates();
-	}
-    logClientAction({ action: "Start uploading video" });
-	uploadVideo()
-    .then(() => {
+
+    const { tempFiles: files } = await chrome.storage.local.get('tempFiles');
+    if (!files || !files.length) {
         buttonsStatesSave('needPermissions');
         updateButtonsStates();
-        //await showModalNotify(["Запись успешно отправлена на сервер."], "Запись отправлена");
-    })
-    .catch(() => {
-        buttonsStatesSave('failedUpload');
-        updateButtonsStates();
+        return;
+    }
+
+    logClientAction({ action: "Send message", messageType: "uploadVideo" });
+
+    chrome.runtime.sendMessage({
+        action: "uploadVideo",
+        activateMediaTab: false
     });
 });
 
@@ -516,120 +514,3 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         logClientAction({ action: "Receive message", messageType: "updateButtonStates" });
     }
 });
-
-async function uploadVideo() {
-    chrome.storage.local.get(['session_id', 'extension_logs'], async ({ session_id, extension_logs }) => {
-        if (!session_id) {
-            console.error("Session ID не найден в хранилище");
-            logClientAction({ action: `Upload fails due to missing session ID ${session_id}` });
-            return;
-        }
-
-        const files = (await chrome.storage.local.get('tempFiles'))['tempFiles'] || [];
-        if (!files.length) {
-            logClientAction("Ошибка при поиске записей");
-            throw new Error(`Ошибка при поиске записей`);
-        }
-
-        const formData = new FormData();
-        const rootDirectory = await navigator.storage.getDirectory();
-
-        for (const filename of files) {
-            if (filename.includes('screen')) {
-                formData.append('screen_video', await (await rootDirectory.getFileHandle(filename, {create: false})).getFile(), filename);
-            } else {
-                formData.append('camera_video', await (await rootDirectory.getFileHandle(filename, {create: false})).getFile(), filename);
-            }
-        }
-        
-        formData.append("id", session_id);
-        const metadata = (await chrome.storage.local.get('metadata'))['metadata'] || {};
-        formData.append("metadata", metadata);
-
-        //logClientAction({ action: "Prepare upload payload", sessionId: session_id, fileNames: [combinedFileName, cameraFileName] });
-
-        if (extension_logs) {
-            let logsToSend;
-            if (typeof extension_logs === "string") {
-                try {
-                    logsToSend = JSON.parse(extension_logs);
-                } catch (e) {
-                    console.error("Ошибка парсинга логов:", e);
-                    logsToSend = [{ error: "Invalid logs", raw_data: extension_logs }];
-                    logClientAction({ action: "Parse logs error", error: e.message });
-                }
-            } else {
-                logsToSend = extension_logs;
-            }
-
-            const logsBlob = new Blob([JSON.stringify(logsToSend, null, 2)], { type: 'application/json' });
-            formData.append("logs", logsBlob, "extension_logs.json");
-
-            const logsFileName = `extension_logs_${session_id}_${getCurrentDateString(new Date())}.json`;
-            const url = URL.createObjectURL(logsBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = logsFileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-
-            logClientAction({ action: "Download logs file", fileName: logsFileName });
-        }
-
-        logClientAction({ action: "Send upload request", sessionId: session_id, messageType: "upload_video" });
-
-        const eventSource = new EventSource(`http://127.0.0.1:5000/progress/${session_id}`);
-
-        const steps = 7;
-
-        eventSource.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-            if (data.step == steps) {
-                logClientAction({ action: "Data transfer completed" });
-                eventSource.close();
-                await showModalNotify([`Статус: ${data.message}`,
-                    `Отправка завершена на 100 %`], "Записи успешно отправлены", true, true);
-            } else {
-                await showModalNotify([`Статус: ${data.message}`,
-                    `Отправка завершена на ${data.step * Math.floor(100 / steps)} %`], "Идёт отправка...", true, true);
-            }
-        };
-        
-        // Срабатывает когда не удаётся установить соединение с источником событий
-        // TODO Наполнить err полезной информацией
-        eventSource.onerror = async (err) => {
-            logClientAction({ action: `An error occurred while trying to connect to the server: ${JSON.stringify(err)}` });
-            eventSource.close();
-            await showModalNotify([`Произошла ошибка при попытке соединения с сервером!`,
-                "Попробуйте отправить запись ещё раз!",
-                "Свяжитесь с преподавателем, если не удалось отправить три раза!",
-            ], 'Ошибка при соединении', true, true);
-        };
-
-        fetch('http://127.0.0.1:5000/upload_video', {
-            method: "POST",
-            body: formData,
-        })
-            .then(async (response) => {
-                if (!response.ok) {
-                    throw new Error(`Ошибка при загрузке видео: ${response.status}`);
-                }
-                const result = await response.json();
-                console.log("Видео успешно отправлено:", result);
-                logClientAction({ action: "Upload video succeeds", sessionId: session_id });
-            })
-            .then(async () => {
-                await deleteFiles();
-                await clearLogs();
-                logClientAction({ action: "Clear logs after upload video" });
-            })
-            .catch(error => {
-                console.error("Ошибка при отправке видео на сервер:", error);
-                buttonsStatesSave('failedUpload');
-                updateButtonsStates();
-                logClientAction({ action: "Upload video fails", error: error.message, sessionId: session_id });
-            });
-    });
-}
