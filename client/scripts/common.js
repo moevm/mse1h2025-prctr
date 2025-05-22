@@ -19,7 +19,7 @@ export async function deleteFilesFromTempList() {
 }
 
 export async function showModalNotify(messages, title = "Уведомление", showOnActiveTab = false, mediaIntependent=false) {
-    chrome.runtime.sendMessage({ action: "closePopup" });
+    await chrome.runtime.sendMessage({ action: "closePopup" });
 
     logClientAction({ action: "showModalNotify", showOnActiveTab});
 

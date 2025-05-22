@@ -228,6 +228,8 @@ chrome.runtime.onMessage.addListener(
 			logClientAction("listener gotoMediaTab");
 			// Активируем вкладку media.html (по URL, переданному в message.mediaExtensionUrl)
 			openTab(message.mediaExtensionUrl);
+			sendResponse({status: "gotoMediaTab_processed"});
+            return true;
 		}
 	  if (message.action === "closeTabAndOpenTab") {
 			chrome.tabs.query({ url: message.mediaExtensionUrl }, (tabs) => {
@@ -240,7 +242,10 @@ chrome.runtime.onMessage.addListener(
 					openTab(message.settingsUrl);
 				}
 			});
+			sendResponse({status: "closeTab_processed"});
+			return true;
 		}
 	  sendResponse(message);
+	  return false;
 	}
 );
