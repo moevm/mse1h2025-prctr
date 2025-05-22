@@ -153,27 +153,6 @@ function sendModalNotifyToActiveTab(messages, title) {
     });
 }
 
-export function waitForNotificationSuppression(timeout = 300) {
-    return new Promise((resolve) => {
-        // Создаём временный слушатель сообщений для получения сигнала от background.js
-        function messageListener(message, sender, sendResponse) {
-            if (message.action === 'suppressModalNotifyAT') {
-                logClientAction("waitForNotificationSuppression suppressModalNotifyAT")
-                chrome.runtime.onMessage.removeListener(messageListener);
-                resolve(true);
-            }
-        }
-        chrome.runtime.onMessage.addListener(messageListener);
-
-        // Если сигнал не придёт за timeout мс, считаем, что уведомление нужно показать
-        setTimeout(() => {
-            logClientAction("waitForNotificationSuppression suppressModalNotifyAT timeout")
-            chrome.runtime.onMessage.removeListener(messageListener);
-            resolve(false);
-        }, timeout);
-    });
-}
-
 export function buttonsStatesSave(state) {
 	chrome.storage.local.set({'bState': state});
     logClientAction({ action: "Save buttons states"});

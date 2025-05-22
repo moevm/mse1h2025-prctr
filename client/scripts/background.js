@@ -119,9 +119,29 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 			action: 'stopRecording'
 		});
 		logClientAction({ action: "Send message", messageType: "stopRecording" });
-	}
-});
-
+	} else if (message.action === 'uploadVideo') {
+		const result = await checkTabState();
+		if (result === undefined) {
+			const tab = await chrome.tabs.create({
+				url: chrome.runtime.getURL('pages/media.html'),
+				index: 0,
+				pinned: true,
+				active: false
+			});
+			await new Promise((resolve) => {
+				const listener = (tabId, changed) => {
+					if (tabId === tab.id && changed.status === 'complete') {
+						chrome.tabs.onUpdated.removeListener(listener);
+						resolve();
+					}
+				};
+				chrome.tabs.onUpdated.addListener(listener);
+			});
+			chrome.tabs.sendMessage(tab.id, { action: 'uploadVideoMedia' });
+		} else {
+			chrome.tabs.sendMessage(result[1], { action: 'uploadVideoMedia' });
+		}
+}});
 
 chrome.runtime.onMessage.addListener(
 	function(message, sender, sendResponse) {
@@ -131,23 +151,6 @@ chrome.runtime.onMessage.addListener(
 				.then(() => sendResponse({ success: true }))
 				.catch((error) => sendResponse({ success: false, error }));
 			return true;
-		}
-	}
-);
-
-chrome.runtime.onMessage.addListener(
-	function(message, sender, sendResponse) {
-		if (message.action === "stopMediaNotification") {
-			chrome.runtime.sendMessage({ action: 'suppressModalNotifyAT' }, (response) => {
-				if (chrome.runtime.lastError) {
-					console.error('Error send suppressModalNotifyAT', chrome.runtime.lastError.message);
-					logClientAction({ action: "Error send suppressModalNotifyAT", message: chrome.runtime.lastError.message});
-				}
-				else {
-					console.log('Response suppressModalNotifyAT', response);
-					logClientAction({ action: "Response suppressModalNotifyAT", response});
-				}
-			});
 		}
 	}
 );

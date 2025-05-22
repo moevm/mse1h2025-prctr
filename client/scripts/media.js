@@ -1,4 +1,4 @@
-import { showModalNotify, waitForNotificationSuppression } from './common.js';
+import { showModalNotify } from './common.js';
 import { buttonsStatesSave, deleteFiles, getCurrentDateString } from "./common.js";
 import { logClientAction, flushLogs, checkAndCleanLogs } from './logger.js';
 
@@ -691,18 +691,13 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         .then(async () => {
             logClientAction({ action: "Start recording succeeds" });
             await sendButtonsStates('recording');
-            // После остановки записи ждём либо подтверждения подавления, либо, по истечении таймаута, выполняем уведомление
-            waitForNotificationSuppression().then(async (suppress) => {
-                if (!suppress) {
-                    await showModalNotify(
-                        ["Запись экрана, микрофона и камеры началась. " +
-                        "Не отключайте разрешения этим элементам до окончания записи.",
-                        "Чтобы завершить запись, нажмите кнопку «Остановить запись» во всплывающем окне расширения прокторинга."],
-                        "Идёт запись",
-                        true
-                    );
-                }
-            });
+            await showModalNotify(
+                ["Запись экрана, микрофона и камеры началась. " +
+                "Не отключайте разрешения этим элементам до окончания записи.",
+                "Чтобы завершить запись, нажмите кнопку «Остановить запись» во всплывающем окне расширения прокторинга."],
+                "Идёт запись",
+                true
+            );
         })
         .catch(async (error) => {
             // В startRecord есть свой обработчик ошибок
@@ -868,27 +863,19 @@ async function stopRecord() {
             "Файл с логами сохранен в папку загрузок по умолчанию."
         ];
         logClientAction(stats);
-        // После остановки записи ждём либо подтверждения подавления, либо, по истечении таймаута, выполняем уведомление
-        waitForNotificationSuppression().then(async (suppress) => {
-            if (!suppress) {
-                await showModalNotify(
-                    stats,
-                    "Запись завершена, статистика:",
-                    true
-                );
-            }
-        });
+
+        await showModalNotify(
+            stats,
+            "Запись завершена, статистика:",
+            true
+        );
+
         if (server_connection && !invalidStop) {
-            // После остановки записи ждём либо подтверждения подавления, либо, по истечении таймаута, выполняем уведомление
-            waitForNotificationSuppression().then(async (suppress) => {
-                if (!suppress) {
-                    await showModalNotify(
-                        ["Для отправки записи необходимо нажать кнопку «Отправить» во всплывающем окне расширения прокторинга."],
-                        "Отправка записи",
-                        true
-                    );
-                }
-            });
+            await showModalNotify(
+                ["Для отправки записи необходимо нажать кнопку «Отправить» во всплывающем окне расширения прокторинга."],
+                "Отправка записи",
+                true
+            );
         }
 
         cleanup();
@@ -987,6 +974,123 @@ async function startRecord() {
         // await sendButtonsStates('needPermissions');
         throw error;
     }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'uploadVideoMedia') {
+        uploadVideo().then(() => sendResponse({ status: "done" }));
+        return true;
+    }
+});
+
+async function uploadVideo() {
+    const { session_id, extension_logs } = await chrome.storage.local.get(['session_id', 'extension_logs']);
+
+    if (!session_id) {
+        console.error("Session ID не найден");
+        logClientAction({ action: `Upload fails due to missing session ID ${session_id}` });
+        return;
+    }
+
+    const files = (await chrome.storage.local.get('tempFiles'))['tempFiles'] || [];
+    if (!files.length) {
+        logClientAction("Ошибка при поиске записей");
+        throw new Error(`Ошибка при поиске записей`);
+    }
+
+    const formData = new FormData();
+    const rootDirectory = await navigator.storage.getDirectory();
+
+    for (const filename of files) {
+        const file = await (await rootDirectory.getFileHandle(filename)).getFile();
+        if (filename.includes('screen')) {
+            formData.append('screen_video', file, filename);
+        } else {
+            formData.append('camera_video', file, filename);
+        }
+    }
+
+    formData.append("id", session_id);
+    const metadata = (await chrome.storage.local.get('metadata'))['metadata'] || {};
+    formData.append("metadata", metadata);
+
+    if (extension_logs) {
+        let logsToSend;
+        if (typeof extension_logs === "string") {
+            try {
+                logsToSend = JSON.parse(extension_logs);
+            } catch (e) {
+                console.error("Ошибка парсинга логов:", e);
+                logsToSend = [{ error: "Invalid logs", raw_data: extension_logs }];
+                logClientAction({ action: "Parse logs error", error: e.message });
+            }
+        } else {
+            logsToSend = extension_logs;
+        }
+
+        const logsBlob = new Blob([JSON.stringify(logsToSend, null, 2)], { type: 'application/json' });
+        formData.append("logs", logsBlob, "extension_logs.json");
+
+        const logsFileName = `extension_logs_${session_id}_${getCurrentDateString(new Date())}.json`;
+        const url = URL.createObjectURL(logsBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = logsFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        logClientAction({ action: "Download logs file", fileName: logsFileName });
+    }
+
+    logClientAction({ action: "Send upload request", sessionId: session_id });
+
+    const eventSource = new EventSource(`http://127.0.0.1:5000/progress/${session_id}`);
+    const steps = 7;
+
+    eventSource.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+        const percent = data.step * Math.floor(100 / steps);
+        if (data.step == steps) {
+            eventSource.close();
+            await showModalNotify([`Статус: ${data.message}`, `Отправка завершена на 100 %`], "Записи успешно отправлены", true);
+        } else {
+            await showModalNotify([`Статус: ${data.message}`, `Отправка завершена на ${percent} %`], "Идёт отправка...", true);
+        }
+    };
+
+    eventSource.onerror = async (err) => {
+        eventSource.close();
+        logClientAction({ action: `EventSource error`, error: err });
+        await showModalNotify([
+            "Ошибка соединения с сервером!",
+            "Попробуйте отправить запись ещё раз.",
+            "Свяжитесь с преподавателем, если не удаётся загрузить."
+        ], 'Ошибка', true);
+    };
+
+    fetch('http://127.0.0.1:5000/upload_video', {
+        method: "POST",
+        body: formData,
+    })
+        .then(async (response) => {
+            if (!response.ok) throw new Error(`Ошибка загрузки: ${response.status}`);
+            const result = await response.json();
+            console.log("Видео успешно отправлено:", result);
+            logClientAction({ action: "Upload succeeded", sessionId: session_id });
+        })
+        .then(async () => {
+            sendButtonsStates('needPermissions');
+            await deleteFiles();
+            await clearLogs();
+            logClientAction({ action: "Очистка после загрузки" });
+        })
+        .catch(error => {
+            console.error("Ошибка загрузки:", error);
+            sendButtonsStates('failedUpload');
+            logClientAction({ action: "Upload failed", error: error.message });
+        });
 }
 
 function delay(ms) {
