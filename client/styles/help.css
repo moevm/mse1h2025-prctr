@@ -7,6 +7,10 @@ body {
     line-height: 1.6;
 }
 
+.readme {
+    font-size: 1.3em;
+}
+
 main#readme-content {
     max-width: 800px;
     margin: 40px auto;

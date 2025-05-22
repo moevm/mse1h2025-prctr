@@ -9,6 +9,10 @@
     border: thick double #001c8c;
     background-color: #faf0ec;
     margin: 0px;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
 }
 
 .page__title {
