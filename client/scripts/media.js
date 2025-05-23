@@ -169,6 +169,15 @@ async function checkOpenedPopup() {
     return isPopupOpen;
 }
 
+function updateMicFill(level) {
+    const fill = document.querySelector('.mic-fill');
+    if (!fill) return;
+    const boosted = Math.sqrt(level * 16); // коэффициент отвечающий за чувствительность
+    const clamped = Math.min(1, Math.max(0, boosted));
+    const percent = (1 - clamped) * 100;
+    fill.style.transform = `translateY(${percent}%)`;
+}
+
 async function sendButtonsStates(state) {
     if (state === 'readyToUpload' && !server_connection) {
         state = 'needPermissions';
@@ -262,6 +271,34 @@ async function getMediaDevices() {
                             reject(micError);
                             return;
                         }
+                    }
+
+                    if (!micPermissionDenied) {
+                        const audioCtx = new AudioContext();
+                        const micSourceNode = audioCtx.createMediaStreamSource(streams.microphone);
+                        const analyser = audioCtx.createAnalyser();
+                        analyser.fftSize = 256;
+                        micSourceNode.connect(analyser);
+
+                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                        const micIcon = document.getElementById('mic-fill');
+
+                        function updateMicFillLoop() {
+                            analyser.getByteTimeDomainData(dataArray);
+
+                            let sum = 0;
+                            for (let i = 0; i < dataArray.length; i++) {
+                                const v = dataArray[i] / 128 - 1;
+                                sum += v * v;
+                            }
+                            const rms = Math.sqrt(sum / dataArray.length);
+
+                            updateMicFill(rms);
+
+                            requestAnimationFrame(updateMicFillLoop);
+                        }
+
+                        requestAnimationFrame(updateMicFillLoop);
                     }
 
                     try {
