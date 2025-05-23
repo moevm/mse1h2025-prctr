@@ -375,6 +375,13 @@ buttonElements.permissions.addEventListener('click', () => {
         activateMediaTab: true
     });
     logClientAction({ action: "Send message", messageType: "getPermissions" });
+    if (server_connection) {
+        inputElements.link.value = "";
+        saveInputValues();
+        logClientAction("Clear link field");
+        // TODO: Общий сброс. Например, когда прерванный прокторинг пользователь не захочет продолжать.
+        // chrome.storage.local.set({ 'sessionId': null });
+    }
 });
 
 buttonElements.upload.addEventListener('click', async () => {
@@ -489,10 +496,23 @@ async function stopRecCallback() {
     logClientAction({ action: "Click stop record button" });
 	buttonElements.stop.setAttribute('disabled', '');
 	buttonElements.start.removeAttribute('disabled');
-	await chrome.runtime.sendMessage({
-		action: "stopRecord",
-        activateMediaTab: false
-	});
+	await chrome.runtime.sendMessage({action: "stopRecord", activateMediaTab: false}, async (response) => {
+        if (chrome.runtime.lastError) {
+            console.error('Error send stopRecord', chrome.runtime.lastError.message);
+            logClientAction({ action: "Error send stopRecord", message: chrome.runtime.lastError.message});
+        }
+        else {
+            if (!server_connection){
+                inputElements.link.value = "";
+                inputElements.link.classList.remove('input-valid');
+                saveInputValues();
+                logClientAction("Clear link field");
+                chrome.storage.local.set({ 'invalidStop': false });
+                chrome.storage.local.set({ 'sessionId': null });
+            }
+        }
+    });
+
     logClientAction({ action: "Send message", messageType: "stopRecord" });
 }
 
@@ -518,10 +538,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function uploadVideo() {
-    chrome.storage.local.get(['session_id', 'extension_logs'], async ({ session_id, extension_logs }) => {
-        if (!session_id) {
+    chrome.storage.local.get(['sessionId', 'extension_logs'], async ({ sessionId, extension_logs }) => {
+        if (!sessionId) {
             console.error("Session ID не найден в хранилище");
-            logClientAction({ action: `Upload fails due to missing session ID ${session_id}` });
+            logClientAction({ action: `Upload fails due to missing session ID ${sessionId}` });
             return;
         }
 
@@ -542,11 +562,11 @@ async function uploadVideo() {
             }
         }
         
-        formData.append("id", session_id);
+        formData.append("id", sessionId);
         const metadata = (await chrome.storage.local.get('metadata'))['metadata'] || {};
         formData.append("metadata", metadata);
 
-        //logClientAction({ action: "Prepare upload payload", sessionId: session_id, fileNames: [combinedFileName, cameraFileName] });
+        //logClientAction({ action: "Prepare upload payload", sessionId: sessionId, fileNames: [combinedFileName, cameraFileName] });
 
         if (extension_logs) {
             let logsToSend;
@@ -565,7 +585,7 @@ async function uploadVideo() {
             const logsBlob = new Blob([JSON.stringify(logsToSend, null, 2)], { type: 'application/json' });
             formData.append("logs", logsBlob, "extension_logs.json");
 
-            const logsFileName = `extension_logs_${session_id}_${getCurrentDateString(new Date())}.json`;
+            const logsFileName = `extension_logs_${sessionId}_${getCurrentDateString(new Date())}.json`;
             const url = URL.createObjectURL(logsBlob);
             const link = document.createElement('a');
             link.href = url;
@@ -578,9 +598,9 @@ async function uploadVideo() {
             logClientAction({ action: "Download logs file", fileName: logsFileName });
         }
 
-        logClientAction({ action: "Send upload request", sessionId: session_id, messageType: "upload_video" });
+        logClientAction({ action: "Send upload request", sessionId: sessionId, messageType: "upload_video" });
 
-        const eventSource = new EventSource(`http://127.0.0.1:5000/progress/${session_id}`);
+        const eventSource = new EventSource(`http://127.0.0.1:5000/progress/${sessionId}`);
 
         const steps = 7;
 
@@ -618,7 +638,14 @@ async function uploadVideo() {
                 }
                 const result = await response.json();
                 console.log("Видео успешно отправлено:", result);
-                logClientAction({ action: "Upload video succeeds", sessionId: session_id });
+                logClientAction({ action: "Upload video succeeds", sessionId: sessionId });
+
+                inputElements.link.value = "";
+                inputElements.link.classList.remove('input-valid', 'input-invalid');
+                saveInputValues();
+                logClientAction("Clear link field");
+                chrome.storage.local.set({ 'invalidStop': false });
+                chrome.storage.local.set({ 'sessionId': null });
             })
             .then(async () => {
                 await deleteFiles();
@@ -629,7 +656,7 @@ async function uploadVideo() {
                 console.error("Ошибка при отправке видео на сервер:", error);
                 buttonsStatesSave('failedUpload');
                 updateButtonsStates();
-                logClientAction({ action: "Upload video fails", error: error.message, sessionId: session_id });
+                logClientAction({ action: "Upload video fails", error: error.message, sessionId: sessionId });
             });
     });
 }
