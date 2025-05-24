@@ -87,6 +87,11 @@ def sse_progress(id):
         }
     )
 
+def convert_user_time_to_utc(user_time_str, user_time_offset):
+    user_time = datetime.strptime(user_time_str, "%Y-%m-%dT%H:%M:%S")
+    user_time_utc = user_time + user_time_offset
+    return user_time_utc.strftime("%Y%m%dT%H%M%S") 
+
 @app.route("/upload_video", methods=["POST"])
 def upload_video():
     """Обрабатывает загрузку видео с клиента, сохраняет файл и обновляет данные сеанса."""
@@ -116,19 +121,38 @@ def upload_video():
         screen_video_paths: list[str] = []
         camera_video_paths: list[str] = []
 
+        session_start_utc = datetime.strptime(
+            f"{session['session_date_start']}T{session['session_time_start']}",
+            "%Y-%m-%dT%H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+
+        user_time_str = os.path.splitext(screen_video[0].filename)[0].split('_')[-1]
+        user_time = datetime.strptime(user_time_str, "%Y-%m-%dT%H:%M:%S") 
+        user_time_offset = session_start_utc - user_time.replace(tzinfo=timezone.utc)
+
         for video in screen_video:
-            screen_extension = os.path.splitext(video.filename)[1] or ".mp4"
-            screen_video_name = f"{id}_screen_{session['session_date_start'].replace('-', '')}T{session['session_time_start'].replace(':', '')}_{session['surname']}{screen_extension}"
+            root, ext = os.path.splitext(video.filename)
+            user_time_str = root.split('_')[-1]
+            user_time_utc = convert_user_time_to_utc(user_time_str, user_time_offset)
+            
+            screen_extension = ext or ".mp4"
+            screen_video_name = f"{id}_screen_{user_time_utc}_{session['surname']}{screen_extension}"
             screen_video_path = os.path.join(UPLOAD_FOLDER, screen_video_name)
+            
             video.save(screen_video_path)
             screen_video_paths.append(screen_video_path)
         
         progress_store[id] = {"step": 3, "message": "Получены и сохранены записи экрана"}
         
         for video in camera_video:
-            camera_extension = os.path.splitext(video.filename)[1] or ".mp4"
-            camera_video_name = f"{id}_camera_{session['session_date_start'].replace('-', '')}T{session['session_time_start'].replace(':', '')}_{session['surname']}{camera_extension}"
+            root, ext = os.path.splitext(video.filename)
+            user_time_str = root.split('_')[-1]
+            user_time_utc = convert_user_time_to_utc(user_time_str, user_time_offset)
+            
+            camera_extension = ext or ".mp4"
+            camera_video_name = f"{id}_camera_{user_time_utc}_{session['surname']}{camera_extension}"
             camera_video_path = os.path.join(UPLOAD_FOLDER, camera_video_name)
+            
             video.save(camera_video_path)
             camera_video_paths.append(camera_video_path)
 

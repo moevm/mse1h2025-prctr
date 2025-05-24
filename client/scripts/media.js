@@ -55,6 +55,8 @@ var metadata = {
     }
 };
 
+combinedPreview.addEventListener('contextmenu', e => e.preventDefault(), {capture: true});
+
 const stopStreams = () => {
     Object.entries(streams).forEach(([stream, value]) => {
         if (value) {

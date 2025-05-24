@@ -14,7 +14,12 @@
         <button id="preview-toggle-btn" disabled>Включить</button>
     </div>
     <div class="preview-container">
-        <video class="combined__preview" controls autoplay></video>
+        <video
+            class="combined__preview"
+            controlsList="nofullscreen nodownload noremoteplayback"
+            controls autoplay 
+            playsinline disablePictureInPicture
+        ></video>
         <video class="camera__preview" autoplay muted></video>
     </div>
 </section>
