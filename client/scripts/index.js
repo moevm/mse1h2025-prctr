@@ -8,7 +8,7 @@ const recordTime = document.querySelector('#record-time')
 
 let timerInterval = null;
 let startTime = null;
-let server_connection = true;
+let server_connection = false;
 chrome.storage.local.set({'server_connection': server_connection});
 
 const inputElements = {
@@ -470,17 +470,12 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'stopRecordSignal') {
-        console.log('Received stopRecordSignal');
-
         clearInterval(timerInterval);
-
         chrome.storage.local.get(['timeStr'], (result) => {
             const timeStr = result.timeStr;
             recordTime.textContent = timeStr;
             sendResponse({status: 'stopRecordSignalProcessed'});
         });
-
-        sendResponse({status: 'stopRecordSignalProcessed'});
         return true;
     }
 });
@@ -545,8 +540,6 @@ async function uploadVideo() {
         formData.append("id", session_id);
         const metadata = (await chrome.storage.local.get('metadata'))['metadata'] || {};
         formData.append("metadata", metadata);
-
-        //logClientAction({ action: "Prepare upload payload", sessionId: session_id, fileNames: [combinedFileName, cameraFileName] });
 
         if (extension_logs) {
             let logsToSend;

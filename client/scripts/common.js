@@ -19,7 +19,7 @@ export async function deleteFilesFromTempList() {
 }
 
 export async function showModalNotify(messages, title = "Уведомление", showOnActiveTab = false, mediaIntependent=false) {
-    chrome.runtime.sendMessage({ action: "closePopup" });
+    await chrome.runtime.sendMessage({ action: "closePopup" });
 
     logClientAction({ action: "showModalNotify", showOnActiveTab});
 
@@ -49,7 +49,7 @@ export async function showModalNotify(messages, title = "Уведомление"
             throw error;
         }
     } else {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage({
                 action: "gotoMediaTab",
                 mediaExtensionUrl: chrome.runtime.getURL("pages/media.html") }, (response) => {
@@ -81,17 +81,19 @@ export async function showModalNotify(messages, title = "Уведомление"
                     <button id="modal-close-btn">Хорошо. Я прочитал(а).</button>
                 `;
 
-                modal.querySelector('#modal-close-btn').addEventListener('click', () => {
+                const closeButton = modal.querySelector('#modal-close-btn');
+                const closeModalHandler = () => {
+                    closeButton.removeEventListener('click', closeModalHandler);
                     overlay.remove();
                     document.body.style.overflow = '';
                     resolve();
-                });
+                }
+                closeButton.addEventListener('click', closeModalHandler);
 
                 document.body.style.overflow = 'hidden';
                 overlay.appendChild(modal);
                 document.body.appendChild(overlay);
             } else {
-                
                 chrome.runtime.sendMessage({
                     type: "showModalNotifyOnMedia",
                     messages: messages,
