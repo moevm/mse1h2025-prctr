@@ -223,7 +223,7 @@ async function getMediaDevices() {
                         "Не отключайте эти разрешения до окончания записи. " +
                         "Это необходимо для корректной работы системы прокторинга."],
                         "Разрешения для прокторинга");
-            chrome.desktopCapture.chooseDesktopMedia(['screen'], async (streamId) => {
+            chrome.desktopCapture.chooseDesktopMedia(['screen', 'audio'], async (streamId) => {
                 if (!streamId) {
                     logClientAction({ action: "User cancels screen selection" });
                     console.error('Пользователь отменил выбор экрана');
@@ -235,6 +235,12 @@ async function getMediaDevices() {
                     logClientAction({ action: "User grants screen access" });
 
                     streams.screen = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                                chromeMediaSourceId: streamId
+                            }
+                        },
                         video: {
                             mandatory: {
                                 chromeMediaSource: 'desktop',
@@ -253,6 +259,8 @@ async function getMediaDevices() {
                             }
                         },
                     });
+
+                    console.log('Audio tracks from screen:', streams.screen.getAudioTracks());
 
                     if (!streams.screen || streams.screen.getVideoTracks().length === 0) {
                         logClientAction({ action: "Screen stream not available" });
@@ -424,9 +432,26 @@ async function getMediaDevices() {
                         }
                     };
 
+                    // Объединяем аудио (экран + микрофон)
+                    const audioContext = new AudioContext();
+                    const destination = audioContext.createMediaStreamDestination();
+
+                    const screenAudioTrack = streams.screen.getAudioTracks()[0];
+                    if (screenAudioTrack) {
+                        const screenSource = audioContext.createMediaStreamSource(new MediaStream([screenAudioTrack]));
+                        screenSource.connect(destination);
+                    }
+
+                    const micAudioTrack = streams.microphone.getAudioTracks()[0];
+                    if (micAudioTrack) {
+                        const micSource = audioContext.createMediaStreamSource(new MediaStream([micAudioTrack]));
+                        micSource.connect(destination);
+                    }
+
                     streams.combined = new MediaStream([
                         streams.screen.getVideoTracks()[0],
-                        streams.microphone.getAudioTracks()[0]
+                        ...destination.stream.getAudioTracks()
+                        // streams.microphone.getAudioTracks()[0]
                     ]);
 
                     combinedPreview.srcObject = streams.combined;
