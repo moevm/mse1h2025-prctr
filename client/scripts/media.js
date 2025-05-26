@@ -36,24 +36,26 @@ var server_connection = undefined;
 var notifications_flag = true;
 var invalidStop = undefined;
 
-var metadata = {
-    screen: {
-        session_client_start: undefined,
-        session_client_end: undefined,
-        session_client_duration: undefined,
-        session_client_mime: undefined,
-        session_client_resolution: undefined,
-        session_client_size: undefined // MB
-    },
-    camera: {
-        session_client_start: undefined,
-        session_client_end: undefined,
-        session_client_duration: undefined,
-        session_client_mime: undefined,
-        session_client_resolution: undefined,
-        session_client_size: undefined // MB
-    }
-};
+// var metadata = {
+//     screen: {
+//         session_client_start: undefined,
+//         session_client_end: undefined,
+//         session_client_duration: undefined,
+//         session_client_mime: undefined,
+//         session_client_resolution: undefined,
+//         session_client_size: undefined // MB
+//     },
+//     camera: {
+//         session_client_start: undefined,
+//         session_client_end: undefined,
+//         session_client_duration: undefined,
+//         session_client_mime: undefined,
+//         session_client_resolution: undefined,
+//         session_client_size: undefined // MB
+//     }
+// };
+
+var metadataRecords = [];
 
 combinedPreview.addEventListener('contextmenu', e => e.preventDefault(), {capture: true});
 
@@ -113,6 +115,7 @@ async function clearLogs() {
                 //ЗДЕСЬ НЕ НАДО ЛОГГИРОВАТЬ
                 //logClientAction({ action: "Clear logs" });
                 console.log("Логи очищены перед завершением");
+                clearMetadataRecords();
             } else {
                 //logClientAction({ action: "Error while clearing logs", error: response.error });
                 // console.error("Ошибка очистки логов:", response.error);
@@ -138,30 +141,81 @@ const getDifferenceInTime = (date1, date2) => {
     return `${formattedHours}:${formattedMinutes}:${formattedSeconds}`;
 };
 
-const setMetadatasRecordOn = () => {
-    metadata.screen.session_client_start = getCurrentDateString(startTime);
-    metadata.screen.session_client_mime = recorders.combined.mimeType;
-    const [screenVideoTrack] = streams.screen.getVideoTracks();
-    const screenSettings = screenVideoTrack.getSettings();
-    metadata.screen.session_client_resolution = `${screenSettings.width}×${screenSettings.height}`;
-    metadata.camera.session_client_start = getCurrentDateString(startTime);
-    metadata.camera.session_client_mime = recorders.camera.mimeType;
-    const [cameraVideoTrack] = streams.camera.getVideoTracks();
-    const cameraSettings = cameraVideoTrack.getSettings();
-    metadata.camera.session_client_resolution = `${cameraSettings.width}×${cameraSettings.height}`;
-    logClientAction({ action: "Set metadata record on" });
+const setMetadatasRecordOn = async () => {
+    // Получаем текущий session_id из хранилища
+    const { session_id } = await chrome.storage.local.get('session_id');
+
+    // Создаем новый объект метаданных для текущей сессии
+    const newMetadata = {
+        session_id: session_id || generateObjectId(), // Если session_id отсутствует, генерируем новый
+        screen: {
+            session_client_start: getCurrentDateString(startTime),
+            session_client_mime: recorders.combined ? recorders.combined.mimeType : undefined,
+            session_client_resolution: undefined,
+            session_client_size: undefined
+        },
+        camera: {
+            session_client_start: getCurrentDateString(startTime),
+            session_client_mime: recorders.camera ? recorders.camera.mimeType : undefined,
+            session_client_resolution: undefined,
+            session_client_size: undefined
+        }
+    };
+
+    // Устанавливаем разрешение для экрана
+    if (streams.screen && streams.screen.getVideoTracks().length > 0) {
+        const [screenVideoTrack] = streams.screen.getVideoTracks();
+        const screenSettings = screenVideoTrack.getSettings();
+        newMetadata.screen.session_client_resolution = `${screenSettings.width}×${screenSettings.height}`;
+    }
+
+    // Устанавливаем разрешение для камеры
+    if (streams.camera && streams.camera.getVideoTracks().length > 0) {
+        const [cameraVideoTrack] = streams.camera.getVideoTracks();
+        const cameraSettings = cameraVideoTrack.getSettings();
+        newMetadata.camera.session_client_resolution = `${cameraSettings.width}×${cameraSettings.height}`;
+    }
+
+    // Добавляем новую запись в массив
+    metadataRecords.push(newMetadata);
+
+    // Сохраняем массив в chrome.storage.local
+    await chrome.storage.local.set({ 'metadataRecords': JSON.stringify(metadataRecords) });
+
+    logClientAction({ action: "Set metadata record on", session_id: newMetadata.session_id });
 };
 
 const setMetadatasRecordOff = async () => {
-    metadata.screen.session_client_end = getCurrentDateString(endTime);
-    metadata.screen.session_client_duration = getDifferenceInTime(endTime, startTime);
-    metadata.camera.session_client_end = getCurrentDateString(endTime);
-    metadata.camera.session_client_duration = getDifferenceInTime(endTime, startTime);
-    const screenFile = await combinedFileHandle.getFile();
-    metadata.screen.session_client_size = (screenFile.size / 1000000).toFixed(3);
-    const cameraFile = await cameraFileHandle.getFile();
-    metadata.camera.session_client_size = (cameraFile.size / 1000000).toFixed(3);
-    logClientAction({ action: "Set metadata record off" });
+    // Получаем текущий session_id
+    const { session_id } = await chrome.storage.local.get('session_id');
+
+    // Находим запись в массиве по session_id
+    const metadataIndex = metadataRecords.findIndex(record => record.session_id === session_id);
+    if (metadataIndex === -1) {
+        logClientAction({ action: "Metadata record not found for session", session_id });
+        return;
+    }
+
+    // Обновляем метаданные для текущей сессии
+    metadataRecords[metadataIndex].screen.session_client_end = getCurrentDateString(endTime);
+    metadataRecords[metadataIndex].screen.session_client_duration = getDifferenceInTime(endTime, startTime);
+    metadataRecords[metadataIndex].camera.session_client_end = getCurrentDateString(endTime);
+    metadataRecords[metadataIndex].camera.session_client_duration = getDifferenceInTime(endTime, startTime);
+
+    // Получаем размеры файлов
+    if (combinedFileHandle) {
+        const screenFile = await combinedFileHandle.getFile();
+        metadataRecords[metadataIndex].screen.session_client_size = (screenFile.size / 1000000).toFixed(3);
+    }
+    if (cameraFileHandle) {
+        const cameraFile = await cameraFileHandle.getFile();
+        metadataRecords[metadataIndex].camera.session_client_size = (cameraFile.size / 1000000).toFixed(3);
+    }
+
+    // Сохраняем обновленный массив в chrome.storage.local
+    await chrome.storage.local.set({ 'metadataRecords': JSON.stringify(metadataRecords) });
+
+    logClientAction({ action: "Set metadata record off", session_id });
 };
 
 async function checkOpenedPopup() {
@@ -311,13 +365,13 @@ async function getMediaDevices() {
                     }
 
                     try {
-                        streams.camera = await navigator.mediaDevices.getUserMedia({ 
+                        streams.camera = await navigator.mediaDevices.getUserMedia({
                             video: {
                                 width: { ideal: 320 },
                                 height: { ideal: 240 },
                                 frameRate: { ideal: 17, max: 17, min: 15 }
-                            }, 
-                            audio: false 
+                            },
+                            audio: false
                         });
                         logClientAction({ action: "User grants camera access" });
                     } catch (camError) {
@@ -651,6 +705,18 @@ window.addEventListener('load', async () => {
             }
         });
     });
+
+    // Загружаем metadataRecords из хранилища
+    const { metadataRecords: storedRecords } = await chrome.storage.local.get('metadataRecords');
+    if (storedRecords) {
+        try {
+            metadataRecords = JSON.parse(storedRecords);
+        } catch (e) {
+            logClientAction({ action: "Error parsing metadataRecords", error: e.message });
+            metadataRecords = [];
+        }
+    }
+
     invalidStop = (await chrome.storage.local.get('invalidStop'))['invalidStop'] || false;
 });
 
@@ -661,7 +727,7 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
             window.removeEventListener('beforeunload', beforeUnloadHandler);
             stopRecord();
             await setMetadatasRecordOff();
-            chrome.storage.local.set({'metadata': JSON.stringify(metadata)});
+            await chrome.storage.local.set({ 'metadataRecords': JSON.stringify(metadataRecords) });
             await sendButtonsStates('readyToUpload');
         }
     }
@@ -1122,3 +1188,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 });
+
+async function clearMetadataRecords() {
+    metadataRecords = [];
+    await chrome.storage.local.set({ 'metadataRecords': JSON.stringify(metadataRecords) });
+    logClientAction({ action: "Clear metadata records" });
+}
